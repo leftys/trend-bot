@@ -27,3 +27,5 @@ CLOSE_AFTER_HOURS = 3
 TELEGRAM_BOT_TOKEN = ''
 # You can get it on https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates
 TELEGRAM_CHAT_ID = ''
+
+SENTRY_URL = ''

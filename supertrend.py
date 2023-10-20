@@ -1,5 +1,3 @@
-
-
 def tr(data):
     data['previous_close'] = data['close'].shift(1)
     data['high-low'] = abs(data['high'] - data['low'])
@@ -11,14 +9,14 @@ def tr(data):
     return tr
 
 
-def atr(data, period):
+def atr(data, period: int):
     data['tr'] = tr(data)
     data.drop(columns = ['high-low', 'high-pc', 'low-pc'], inplace=True)
     atr = data['tr'].rolling(period).mean()
 
     return atr
 
-def supertrend(df, period, atr_multiplier):
+def supertrend(df, period: int, atr_multiplier: float):
     hl2 = (df['high'] + df['low']) / 2
     df['atr'] = atr(df, period)
     df['upperband'] = hl2 + (atr_multiplier * df['atr'])
