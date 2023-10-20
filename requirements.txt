@@ -3,3 +3,5 @@ schedule
 ccxt
 pandas
 numpy
+cachetools
+sentry-sdk

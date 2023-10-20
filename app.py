@@ -5,14 +5,15 @@ Close after preset time or when other bound is hit.
 
 Integrated with Telegram for notifications and Sentry for errors.
 '''
-
 from typing import Literal
 from datetime import datetime
 import logging
+import time
+
+from cachetools.func import ttl_cache
 import ccxt
 import schedule
 import pandas as pd
-import time
 
 from supertrend import supertrend
 from integrations import send_telegram_message
@@ -28,20 +29,22 @@ logging.basicConfig(
 
 # Globals
 logger = logging.getLogger('app')
+logger.setLevel(logging.INFO)
 exchange: ccxt.Exchange
 previous_position = None
 
 def create_stop_order(side: Literal['buy', 'sell'], stop_price: float, quantity: float, max_slip: float) -> dict:
     logger.info(f"Opening stop order {side} {quantity} at {stop_price}")
-    autocancel_time = int(time.time()) + 60 * 60 * 8 # 8 hours
+    # Autocancel orders in 1h after creation
+    autocancel_time = int(time.time()) + 60 * 60 * 1
     order = exchange.create_order(
         config.SYMBOL, 'limit', side, amount = quantity, price = stop_price + max_slip * (1 if side == 'buy' else -1),
         params={'type': 'TAKE_PROFIT_LIMIT', 'stopPrice': stop_price, 'timeInForce': 'GTD', 'newClientOrderId': f'btc-{side}-stop-limit', 'goodTillDate': autocancel_time * 1000}
     )
-    logger.info(order)
+    logger.debug(order)
     return order
 
-def check_buy_sell_signals(df):
+def entry_signals(df):
     global previous_position
     position = get_position(config.SYMBOL)
     if previous_position is None:
@@ -49,9 +52,8 @@ def check_buy_sell_signals(df):
     logger.info('Position %f', position)
 
     logger.info("Checking for buy and sell signals...")
-    logger.info(df.tail(config.LOGS_DISPLAYED + 1))
+    logger.debug(df.tail(config.LOGS_DISPLAYED + 1))
     last_row_index = len(df.index) - 1
-    # previous_row_index = last_row_index - 1
     atr = df['atr'][last_row_index]
     max_slip = atr / 2.
     price_upper = df['upperband'][last_row_index]
@@ -72,16 +74,32 @@ def check_buy_sell_signals(df):
 
     # df['in_downtrend'][last_row_index]
 
-    # If last fill is neede for one of the following conditions, fetch it
-    if previous_position != position or abs(position) > 1e-6:
-        last_fill = exchange.fetch_my_trades(symbol=config.SYMBOL, limit=1)[0]
-        open_fill_time = last_fill['timestamp']
-        open_fill_side = last_fill['side']
-        open_fill_sign = 1 if open_fill_side == 'buy' else -1
-        open_fill_price = last_fill['price']
+def handle_fills():
+    global previous_position
+
+    position = get_position(config.SYMBOL)
+    if previous_position == position == 0:
+        # Early exit
+        return
+
+    # If last fill is needed for one of the following conditions, fetch it
+    last_fill = exchange.fetch_my_trades(symbol=config.SYMBOL, limit=1)[0]
+    open_fill_time = last_fill['timestamp']
+    open_fill_price = last_fill['price']
+    open_fill_stop = last_fill.get('stopPrice', None)
+    open_fill_stop = float(open_fill_stop) if open_fill_stop else None
+    open_fill_side = last_fill['side']
+    open_fill_sign = 1 if open_fill_side == 'buy' else -1
 
     if previous_position != position:
-        send_telegram_message(f'Position changed from {previous_position} to {position} for {open_fill_price}.')
+        if open_fill_stop:
+            worse_slippage_bps = abs(open_fill_price / open_fill_stop - 1) * 10_000
+        else:
+            worse_slippage_bps = float('nan')
+        send_telegram_message(
+            f'Position changed from {previous_position} to {position} for {open_fill_price} after stop {open_fill_stop}.'
+            f' That is {worse_slippage_bps:.4f} bps slippage'
+        )
 
     # If we have position, close it after x hours
     if abs(position) > 1e-6:
@@ -98,9 +116,9 @@ def check_buy_sell_signals(df):
 def opposite(side: Literal['buy', 'sell']) -> Literal['buy', 'sell']:
     return 'buy' if side == 'sell' else 'sell'
 
+@ttl_cache(ttl = 5)
 def get_position(symbol: str) -> float:
     response = exchange.fetch_positions(symbols = [symbol])
-    # logger.info(response)
     position = float(response[0]['info']['positionAmt'])
     return position
 
@@ -115,15 +133,14 @@ def cancel_orders() -> None:
         pass
 
 def run_supertrend():
-    logger.info('TrendBot is working...')
-
     logger.info(f"Fetching new bars for: {datetime.now().isoformat()}")
     bars = exchange.fetch_ohlcv(config.SYMBOL, timeframe=config.TIMEFRAME, limit=config.LOOKBACK)
     df = pd.DataFrame(bars[:-1], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
 
     supertrend_df = supertrend(df, config.PERIOD, config.ATR_FACTOR)
-    check_buy_sell_signals(supertrend_df)
+    entry_signals(supertrend_df)
+    handle_fills()
 
 def table(values):
     '''convert list of dicts/lists into a simple table-string for printing'''
@@ -136,7 +153,7 @@ def table(values):
 
 if __name__ == '__main__':
     pd.set_option('display.max_rows', None)
-    schedule.every(1).minutes.at(":05").do(run_supertrend)
+    schedule.every(1).minutes.at(":55").do(run_supertrend)
     try:
         exchange= ccxt.binance({
             "apiKey": config.API_KEY,
@@ -146,17 +163,19 @@ if __name__ == '__main__':
                 'defaultType': 'future',
             },
         })
-
         # To run binance paper trading (https://testnet.binancefuture.com/)
         exchange.set_sandbox_mode(config.SANDBOX_MODE)
 
+        # First run
         run_supertrend()
+        # Schedule loop
         while True:
             schedule.run_pending()
             time.sleep(1)
     except KeyboardInterrupt:
-        logger.info('Exitting & closing orders')
+        logger.warning('Exitting')
         cancel_orders()
+        logger.info('Orders closed')
 
 # TODO influx, unit tests
 # TODO close my current hedging btc short position

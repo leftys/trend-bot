@@ -15,7 +15,7 @@ The bot is connected with Binance by utilizing BinanceAPI.
 
 Install Python dependencies provided in the `requirements.txt` file.
 
-Run the following line in the project directory: 
+Run the following line in the project directory:
 
 ```
 pip install -r requirements.txt
@@ -49,7 +49,7 @@ You should note the following points:
 ```
 API_KEY = 'Your Binance Api Key goes here'
 API_SECRET = 'Your Binance Api Secret goes here'
-SYMBOL = "BTC/USDT" 
+SYMBOL = "BTC/USDT"
 QUANTITY = 0.05
 TIMEFRAME = '1m'
 LOOKBACK = 90
@@ -67,27 +67,3 @@ If you want to disable paper-trading, head to the main file: `FTT.py`, comment o
 ```
 #exchange.set_sandbox_mode(True)
 ```
-
-
-## Deploy Bot 🤖
-
-Run the following line in the project directory: 
-
-```
-python FTT.py
-```
-An instance of the bot running on the above settings:
-
-<img src="bot.png" alt="Alt text" title="Optional title" width=auto height="300">
-
-
-Exit at any time with `Ctrl+C`.
-
-
-## Disclaimer ✔
-
-This software is for educational purposes only. Do not risk money which you are afraid to lose. USE THE SOFTWARE AT YOUR OWN RISK. I ASSUME NO RESPONSIBILITY FOR YOUR TRADING RESULTS.
-
-Always start by running a trading bot in PAPER-TRADING and do not engage money before you understand how it works and what profit/loss you should expect.
-
-I strongly recommend you to have coding and Python knowledge. Do not hesitate to read the source code and understand the mechanism of this bot.
